@@ -1,4 +1,5 @@
 # simpleapps
 Simple Apps
 
-Folder for simple free applications.
+Matematika 1 - https://tothgit.github.io/simpleapps/matematika1/
+
