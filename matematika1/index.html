@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Počítáme – Sčítání 🧮</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Comic Sans MS', 'Trebuchet MS', system-ui, sans-serif;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #74ebd5 0%, #9face6 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    overflow-x: hidden;
+  }
+  .card {
+    background: #fff;
+    border-radius: 30px;
+    box-shadow: 0 18px 40px rgba(0,0,0,.2);
+    width: 100%;
+    max-width: 460px;
+    padding: 28px 26px 32px;
+    text-align: center;
+    position: relative;
+  }
+  h1 { font-size: 1.7rem; color: #5b4ea8; margin-bottom: 4px; }
+  .subtitle { color: #888; font-size: .9rem; margin-bottom: 16px; }
+
+  .stats {
+    display: flex;
+    justify-content: space-around;
+    background: #f3f1ff;
+    border-radius: 16px;
+    padding: 10px;
+    margin-bottom: 20px;
+  }
+  .stat { display: flex; flex-direction: column; }
+  .stat .num { font-size: 1.4rem; font-weight: bold; color: #5b4ea8; }
+  .stat .lbl { font-size: .72rem; color: #999; text-transform: uppercase; letter-spacing: .5px; }
+
+  .levels {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+  }
+  .lvl {
+    border: 3px solid #c5bdf0;
+    background: #fff;
+    color: #5b4ea8;
+    border-radius: 14px;
+    padding: 8px 14px;
+    font-size: 1rem;
+    font-weight: bold;
+    font-family: inherit;
+    cursor: pointer;
+    transition: transform .1s;
+  }
+  .lvl:active { transform: scale(.94); }
+  .lvl.active { background: #5b4ea8; color: #fff; border-color: #5b4ea8; }
+
+  .stars { font-size: 1.6rem; min-height: 2rem; margin-bottom: 6px; letter-spacing: 3px; }
+  .starcount { font-size: .95rem; color: #5b4ea8; margin-bottom: 12px; }
+  .starcount b { font-size: 1.1rem; }
+
+  .problem {
+    font-size: 3.2rem;
+    font-weight: bold;
+    color: #333;
+    margin: 10px 0 18px;
+    user-select: none;
+  }
+  .problem .op { color: #ff7043; }
+
+  .answer {
+    width: 150px;
+    font-size: 2.4rem;
+    text-align: center;
+    border: 3px solid #c5bdf0;
+    border-radius: 16px;
+    padding: 8px;
+    outline: none;
+    color: #5b4ea8;
+    font-family: inherit;
+  }
+  .answer:focus { border-color: #7c6ce0; }
+
+  .btn {
+    display: inline-block;
+    border: none;
+    border-radius: 16px;
+    padding: 14px 22px;
+    font-size: 1.1rem;
+    font-weight: bold;
+    font-family: inherit;
+    cursor: pointer;
+    margin: 16px 6px 0;
+    transition: transform .1s;
+    color: #fff;
+  }
+  .btn:active { transform: scale(.94); }
+  .btn-check { background: #5b4ea8; }
+  .btn-next  { background: #ff7043; }
+
+  .feedback { min-height: 1.8rem; font-size: 1.3rem; font-weight: bold; margin-top: 16px; }
+  .ok  { color: #2ecc71; }
+  .no  { color: #e74c3c; }
+
+  .keypad {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+    max-width: 240px;
+    margin: 18px auto 0;
+  }
+  .key {
+    background: #eee9ff;
+    border: none;
+    border-radius: 14px;
+    padding: 16px 0;
+    font-size: 1.4rem;
+    font-weight: bold;
+    color: #5b4ea8;
+    cursor: pointer;
+    font-family: inherit;
+  }
+  .key:active { background: #d8cfff; }
+  .key.wide { grid-column: span 1; }
+
+  /* slavící animace */
+  .confetti {
+    position: fixed; top: -10px; width: 10px; height: 16px;
+    opacity: .9; z-index: 99; border-radius: 2px;
+    animation: fall linear forwards;
+  }
+  @keyframes fall {
+    to { transform: translateY(105vh) rotate(540deg); opacity: 1; }
+  }
+  .pop { animation: pop .4s ease; }
+  @keyframes pop {
+    0% { transform: scale(1); } 40% { transform: scale(1.25); } 100% { transform: scale(1); }
+  }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>🧮 Počítáme</h1>
+    <div class="subtitle">Vyber si počítání i obtížnost a sbírej hvězdičky!</div>
+
+    <div class="levels" id="ops">
+      <button class="lvl active" data-op="add">➕ Sčítání</button>
+      <button class="lvl" data-op="sub">➖ Odčítání</button>
+    </div>
+
+    <div class="levels" id="levels">
+      <button class="lvl active" data-max="10">do 10</button>
+      <button class="lvl" data-max="20">do 20</button>
+      <button class="lvl" data-max="50">do 50</button>
+      <button class="lvl" data-max="100">do 100</button>
+    </div>
+
+    <div class="stars" id="stars"></div>
+    <div class="starcount" id="starcount">Získané hvězdičky: <b>0</b> ⭐</div>
+
+    <div class="problem" id="problem">3 <span class="op">+</span> 4 = ?</div>
+
+    <input class="answer" id="answer" type="text" inputmode="numeric" readonly placeholder="?">
+
+    <div class="keypad" id="keypad"></div>
+
+    <div>
+      <button class="btn btn-check" id="check">Zkontrolovat ✓</button>
+      <button class="btn btn-next"  id="next" style="display:none;">Další ➜</button>
+    </div>
+
+    <div class="feedback" id="feedback"></div>
+  </div>
+
+<script>
+  let a = 0, b = 0, totalStars = 0, starRow = 0, answered = false, maxSum = 10, op = 'add';
+
+  const $ = id => document.getElementById(id);
+  const problemEl = $('problem'), answerEl = $('answer'), feedbackEl = $('feedback');
+  const starsEl = $('stars');
+  const starCountEl = $('starcount').querySelector('b');
+  const checkBtn = $('check'), nextBtn = $('next');
+
+  // jednoduchý zvuk přes Web Audio
+  let actx;
+  function beep(freq, dur, type='sine') {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = type; o.frequency.value = freq;
+      o.connect(g); g.connect(actx.destination);
+      g.gain.setValueAtTime(.2, actx.currentTime);
+      g.gain.exponentialRampToValueAtTime(.001, actx.currentTime + dur);
+      o.start(); o.stop(actx.currentTime + dur);
+    } catch(e) {}
+  }
+  const goodSound = () => { beep(660,.12); setTimeout(()=>beep(880,.18),120); };
+  const badSound  = () => beep(160,.3,'sawtooth');
+
+  function correct() {
+    return op === 'add' ? a + b : a - b;
+  }
+
+  function newProblem() {
+    if (op === 'add') {
+      // součet vždy do vybraného maxima
+      a = Math.floor(Math.random() * (maxSum + 1));   // 0–maxSum
+      const maxB = maxSum - a;
+      b = Math.floor(Math.random() * (maxB + 1));     // tak, aby a+b <= maxSum
+    } else {
+      // odčítání: a >= b, takže výsledek je vždy >= 0
+      a = Math.floor(Math.random() * (maxSum + 1));   // 0–maxSum
+      b = Math.floor(Math.random() * (a + 1));        // 0–a
+    }
+    const sign = op === 'add' ? '+' : '−';
+    problemEl.innerHTML = a + ' <span class="op">' + sign + '</span> ' + b + ' = ?';
+    answerEl.value = '';
+    answered = false;
+    feedbackEl.textContent = '';
+    feedbackEl.className = 'feedback';
+    checkBtn.style.display = '';
+    nextBtn.style.display = 'none';
+  }
+
+  function renderStars() {
+    const s = Math.min(10, starRow);
+    starsEl.textContent = '⭐'.repeat(s) + '☆'.repeat(10 - s);
+  }
+
+  function confetti() {
+    const colors = ['#ff7043','#5b4ea8','#2ecc71','#ffd54f','#42a5f5','#ec407a'];
+    for (let i = 0; i < 40; i++) {
+      const c = document.createElement('div');
+      c.className = 'confetti';
+      c.style.left = Math.random()*100 + 'vw';
+      c.style.background = colors[Math.floor(Math.random()*colors.length)];
+      c.style.animationDuration = (1.5 + Math.random()*1.5) + 's';
+      document.body.appendChild(c);
+      setTimeout(() => c.remove(), 3000);
+    }
+  }
+
+  function check() {
+    if (answered) return;
+    if (answerEl.value === '') { feedbackEl.textContent = 'Napiš odpověď 🙂'; feedbackEl.className='feedback'; return; }
+    answered = true;
+    const val = parseInt(answerEl.value, 10);
+    checkBtn.style.display = 'none';
+    nextBtn.style.display = '';
+    // místo otazníku ukaž správný výsledek
+    const sign = op === 'add' ? '+' : '−';
+    problemEl.innerHTML = a + ' <span class="op">' + sign + '</span> ' + b + ' = ' + correct();
+    if (val === correct()) {
+      totalStars += 1;
+      starRow += 1;
+      starCountEl.textContent = totalStars;
+      feedbackEl.textContent = pickPraise();
+      feedbackEl.className = 'feedback ok';
+      problemEl.classList.add('pop');
+      setTimeout(()=>problemEl.classList.remove('pop'), 400);
+      goodSound();
+      if (starRow >= 10) { confetti(); starRow = 0; }
+    } else {
+      feedbackEl.textContent = '🙈 Skoro! Správně je ' + correct();
+      feedbackEl.className = 'feedback no';
+      badSound();
+    }
+    renderStars();
+  }
+
+  function pickPraise() {
+    const p = ['🎉 Správně!', '👏 Výborně!', '🌟 Super!', '💪 Jednička!', '😀 Skvělé!'];
+    return p[Math.floor(Math.random()*p.length)];
+  }
+
+  // klávesnice na obrazovce
+  const keys = ['1','2','3','4','5','6','7','8','9','⌫','0','✓'];
+  const keypad = $('keypad');
+  keys.forEach(k => {
+    const btn = document.createElement('button');
+    btn.className = 'key';
+    btn.textContent = k;
+    btn.addEventListener('click', () => {
+      if (k === '⌫') answerEl.value = answerEl.value.slice(0, -1);
+      else if (k === '✓') { answered ? newProblem() : check(); }
+      else if (answerEl.value.length < 3) answerEl.value += k;
+    });
+    keypad.appendChild(btn);
+  });
+
+  // přepínač operace (sčítání / odčítání)
+  document.querySelectorAll('#ops .lvl').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#ops .lvl').forEach(x => x.classList.remove('active'));
+      btn.classList.add('active');
+      op = btn.dataset.op;
+      totalStars = 0;
+      starRow = 0;
+      starCountEl.textContent = totalStars;
+      renderStars();
+      newProblem();
+    });
+  });
+
+  // přepínač obtížnosti
+  document.querySelectorAll('#levels .lvl').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#levels .lvl').forEach(x => x.classList.remove('active'));
+      btn.classList.add('active');
+      maxSum = parseInt(btn.dataset.max, 10);
+      newProblem();
+    });
+  });
+
+  checkBtn.addEventListener('click', check);
+  nextBtn.addEventListener('click', newProblem);
+
+  // fyzická klávesnice
+  document.addEventListener('keydown', e => {
+    if (e.key >= '0' && e.key <= '9') { if (answerEl.value.length < 3) answerEl.value += e.key; }
+    else if (e.key === 'Backspace') answerEl.value = answerEl.value.slice(0, -1);
+    else if (e.key === 'Enter') { answered ? newProblem() : check(); }
+  });
+
+  newProblem();
+  renderStars();
+</script>
+</body>
+</html>
