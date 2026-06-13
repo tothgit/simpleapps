@@ -1,1 +1,591 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Online Photo Puzzle</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", Tahoma, sans-serif;
+    background: #1e1e2e;
+    color: #e0e0e0;
+    min-height: 100vh;
+  }
+  header {
+    text-align: center;
+    padding: 18px 10px;
+    background: #2a2a3d;
+    box-shadow: 0 2px 8px rgba(0,0,0,.4);
+  }
+  header h1 { margin: 0 0 12px; font-size: 26px; letter-spacing: .5px; }
+  .controls { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; align-items: center; }
+  .btn {
+    background: #4f7cff;
+    color: #fff;
+    border: none;
+    padding: 10px 18px;
+    border-radius: 8px;
+    font-size: 15px;
+    cursor: pointer;
+    transition: background .15s;
+  }
+  .btn:hover { background: #3a64e0; }
+  .btn.secondary { background: #44485c; }
+  .btn.secondary:hover { background: #565b73; }
+  #status { font-size: 14px; color: #aab; }
 
+  .stage {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 20px;
+    padding: 24px;
+    flex-wrap: wrap;
+  }
+  .tray {
+    min-width: 150px;
+    min-height: 300px;
+    flex: 1 1 180px;
+    max-width: 260px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-content: flex-start;
+    padding: 12px;
+    background: #26263a;
+    border: 2px dashed #3a3a55;
+    border-radius: 12px;
+  }
+  .tray.over { border-color: #ffd24f; }
+  .board-wrap {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+  }
+  #board {
+    display: grid;
+    background: #15151f;
+    border: 3px solid #4f7cff;
+    border-radius: 0;
+    padding: 0;
+    box-shadow: 0 0 25px rgba(79,124,255,.25);
+  }
+  .cell {
+    border: none;
+    position: relative;
+  }
+  .cell.over { outline: 2px solid #ffd24f; outline-offset: -2px; }
+
+  .piece {
+    cursor: grab;
+    background-repeat: no-repeat;
+    filter: drop-shadow(0 2px 3px rgba(0,0,0,.55));
+    touch-action: none;
+  }
+  .piece.placed { cursor: grab; }
+  .piece.dragging { opacity: .4; }
+  .piece.wrong { cursor: grab; }
+
+  .hint { font-size: 13px; color: #888; max-width: 600px; margin: 0 auto; text-align: center; padding: 0 16px 24px; }
+  .win {
+    text-align: center;
+    color: #6dffa0;
+    font-size: 20px;
+    font-weight: bold;
+    padding: 10px;
+    display: none;
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Online Photo Puzzle</h1>
+  <div class="controls">
+    <button class="btn" id="uploadBtn">Nahrát obrázek</button>
+    <input type="file" id="fileInput" accept="image/*" hidden>
+    <button class="btn secondary" id="shuffleBtn" disabled>Zamíchat</button>
+    <span id="status">Nahraj obrázek pro vytvoření puzzle.</span>
+  </div>
+</header>
+
+<div class="win" id="winMsg">🎉 Hotovo! Puzzle složeno.</div>
+
+<div class="stage">
+  <div class="tray" id="trayLeft"></div>
+  <div class="board-wrap">
+    <div id="board"></div>
+  </div>
+  <div class="tray" id="trayRight"></div>
+</div>
+
+<script>
+const fileInput  = document.getElementById('fileInput');
+const uploadBtn  = document.getElementById('uploadBtn');
+const shuffleBtn = document.getElementById('shuffleBtn');
+const statusEl   = document.getElementById('status');
+const board      = document.getElementById('board');
+const trayLeft   = document.getElementById('trayLeft');
+const trayRight  = document.getElementById('trayRight');
+const winMsg     = document.getElementById('winMsg');
+
+// Cílová velikost delší strany hracího pole
+const MAX_BOARD = 640;
+
+let cols = 0, rows = 0;
+let pieceW = 0, pieceH = 0;
+let totalPieces = 0;
+let placedCount = 0;
+let imgURL = null;
+let pieceMargin = 0;   // přesah výstupku kolem dílu
+let tabDepth = 0;      // hloubka zámku
+
+/* ---------- Tvar puzzle dílu (SVG path pro clip-path) ----------
+   Pro každou hranu: e = 0 rovná (okraj obrázku), +1 výstupek ven, -1 zářez dovnitř.
+   Souřadnice v px v rámci ohraničujícího boxu dílu; vnitřní buňka začíná na (margin, margin). */
+function piecePath(w, h, margin, T, top, right, bottom, left) {
+  const n = v => Math.round(v * 100) / 100;
+  // rohy vnitřní buňky
+  const TLx = margin,      TLy = margin;
+  const TRx = margin + w,  TRy = margin;
+  const BRx = margin + w,  BRy = margin + h;
+  const BLx = margin,      BLy = margin + h;
+
+  // jedna hrana: start -> (along axis) délky L, výstupek ve směru (ox,oy)
+  function edge(sx, sy, ax, ay, ox, oy, L, e) {
+    if (e === 0) {
+      const ex = sx + ax * L, ey = sy + ay * L;
+      return `L ${n(ex)} ${n(ey)} `;
+    }
+    const Ts = e * T;
+    const P = (f, p) => [ sx + ax * L * f + ox * Ts * p,
+                          sy + ay * L * f + oy * Ts * p ];
+    const a  = P(0.38, 0);
+    const b1 = P(0.40, 0.22), b2 = P(0.30, 0.30), b3 = P(0.33, 0.58);
+    const c1 = P(0.27, 1.00), c2 = P(0.73, 1.00), c3 = P(0.67, 0.58);
+    const d1 = P(0.70, 0.30), d2 = P(0.60, 0.22), d3 = P(0.62, 0);
+    const end = P(1, 0);
+    const j = pt => `${n(pt[0])} ${n(pt[1])}`;
+    return `L ${j(a)} C ${j(b1)} ${j(b2)} ${j(b3)} ` +
+           `C ${j(c1)} ${j(c2)} ${j(c3)} ` +
+           `C ${j(d1)} ${j(d2)} ${j(d3)} L ${j(end)} `;
+  }
+
+  let d = `M ${n(TLx)} ${n(TLy)} `;
+  d += edge(TLx, TLy,  1,  0,  0, -1, w, top);     // horní (výstupek nahoru)
+  d += edge(TRx, TRy,  0,  1,  1,  0, h, right);   // pravá (výstupek vpravo)
+  d += edge(BRx, BRy, -1,  0,  0,  1, w, bottom);  // spodní (výstupek dolů)
+  d += edge(BLx, BLy,  0, -1, -1,  0, h, left);    // levá (výstupek vlevo)
+  d += 'Z';
+  return d;
+}
+
+// Umístění dílu do buňky: díl je větší než buňka (kvůli výstupkům), proto absolutně s posunem
+function setInCell(piece) {
+  piece.style.position = 'absolute';
+  piece.style.left = (-pieceMargin) + 'px';
+  piece.style.top  = (-pieceMargin) + 'px';
+  piece.style.margin = '0';
+}
+// Vrácení do zásobníku: normální tok
+function setInTray(piece) {
+  piece.style.position = 'static';
+  piece.style.left = '';
+  piece.style.top  = '';
+  piece.style.margin = '';
+}
+
+uploadBtn.addEventListener('click', () => fileInput.click());
+
+fileInput.addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (imgURL) URL.revokeObjectURL(imgURL);
+  imgURL = URL.createObjectURL(file);
+  const img = new Image();
+  img.onload = () => buildPuzzle(img);
+  img.onerror = () => { statusEl.textContent = 'Obrázek se nepodařilo načíst.'; };
+  img.src = imgURL;
+});
+
+shuffleBtn.addEventListener('click', () => {
+  if (totalPieces) scatterPieces();
+});
+
+function buildPuzzle(img) {
+  // Orientace: širší než vyšší -> 5x4 (5 sloupců, 4 řádky), jinak 4x5
+  if (img.naturalWidth > img.naturalHeight) {
+    cols = 5; rows = 4;
+  } else {
+    cols = 4; rows = 5;
+  }
+
+  // Velikost hracího pole se zachováním poměru stran obrázku
+  const ratio = img.naturalWidth / img.naturalHeight;
+  let boardW, boardH;
+  if (ratio >= 1) {
+    boardW = MAX_BOARD;
+    boardH = Math.round(MAX_BOARD / ratio);
+  } else {
+    boardH = MAX_BOARD;
+    boardW = Math.round(MAX_BOARD * ratio);
+  }
+
+  pieceW = Math.floor(boardW / cols);
+  pieceH = Math.floor(boardH / rows);
+  boardW = pieceW * cols;
+  boardH = pieceH * rows;
+  totalPieces = cols * rows;
+  placedCount = 0;
+
+  // Hrací pole (+6 px = 2×3 px okraj, aby okraj nepřekryly krajní díly)
+  board.style.width  = (boardW + 6) + 'px';
+  board.style.height = (boardH + 6) + 'px';
+  board.style.gridTemplateColumns = `repeat(${cols}, ${pieceW}px)`;
+  board.style.gridTemplateRows    = `repeat(${rows}, ${pieceH}px)`;
+  board.innerHTML = '';
+  trayLeft.innerHTML = '';
+  trayRight.innerHTML = '';
+  winMsg.style.display = 'none';
+
+  // Hloubka zámku (výstupku/zářezu) a okraj kolem dílu, do kterého zasahuje
+  tabDepth = Math.round(Math.min(pieceW, pieceH) * 0.27);
+  pieceMargin = tabDepth + 1;
+
+  // Šířka zásobníku tak, aby se vedle sebe vešly přesně dva díly
+  const boxW = pieceW + 2 * pieceMargin;
+  const trayW = boxW * 2 + 8 + 24 + 4;
+  [trayLeft, trayRight].forEach(t => {
+    t.style.flex = '0 0 auto';
+    t.style.width = trayW + 'px';
+    t.style.minWidth = trayW + 'px';
+    t.style.maxWidth = trayW + 'px';
+  });
+
+  const cells = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const cell = document.createElement('div');
+      cell.className = 'cell';
+      cell.dataset.index = r * cols + c;
+      addCellDropHandlers(cell);
+      board.appendChild(cell);
+      cells.push(cell);
+    }
+  }
+
+  // Náhodné zámky mezi sousedními díly (sousedé mají vždy protitvar)
+  // vEdge[r][c] = pravý okraj dílu (r,c) = levý okraj dílu (r,c+1)
+  // hEdge[r][c] = spodní okraj dílu (r,c) = horní okraj dílu (r+1,c)
+  const rnd = () => (Math.random() < 0.5 ? 1 : -1);
+  const vEdge = [];
+  for (let r = 0; r < rows; r++) {
+    const row = [];
+    for (let c = 0; c < cols - 1; c++) row.push(rnd());
+    vEdge.push(row);
+  }
+  const hEdge = [];
+  for (let r = 0; r < rows - 1; r++) {
+    const row = [];
+    for (let c = 0; c < cols; c++) row.push(rnd());
+    hEdge.push(row);
+  }
+
+  // Vytvoření dílů
+  pieces = [];
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = r * cols + c;
+      const top    = r > 0        ? -hEdge[r - 1][c] : 0;
+      const bottom = r < rows - 1 ?  hEdge[r][c]     : 0;
+      const left   = c > 0        ? -vEdge[r][c - 1] : 0;
+      const right  = c < cols - 1 ?  vEdge[r][c]     : 0;
+
+      const p = document.createElement('div');
+      p.className = 'piece';
+      p.dataset.index = idx;
+      p.style.width  = boxW + 'px';
+      p.style.height = (pieceH + 2 * pieceMargin) + 'px';
+      p.style.backgroundImage = `url(${imgURL})`;
+      p.style.backgroundSize  = `${boardW}px ${boardH}px`;
+      p.style.backgroundPosition =
+        `${-(c * pieceW - pieceMargin)}px ${-(r * pieceH - pieceMargin)}px`;
+      p.style.clipPath = `path('${piecePath(pieceW, pieceH, pieceMargin, tabDepth, top, right, bottom, left)}')`;
+      p.draggable = true;
+      addPieceDragHandlers(p);
+      addTouchHandlers(p);
+      pieces.push(p);
+    }
+  }
+
+  showAssembled();
+  shuffleBtn.disabled = false;
+  statusEl.textContent = '';
+}
+
+// Zobrazí celý obrázek složený v prostředním poli (bez zamíchání)
+function showAssembled() {
+  removeGhosts();
+  trayLeft.innerHTML = '';
+  trayRight.innerHTML = '';
+  board.querySelectorAll('.cell').forEach(c => c.innerHTML = '');
+  winMsg.style.display = 'none';
+  pieces.forEach(p => {
+    p.classList.remove('wrong');
+    p.classList.add('placed');
+    p.draggable = true;
+    const cell = board.querySelector(`.cell[data-index="${p.dataset.index}"]`);
+    cell.appendChild(p);
+    setInCell(p);
+  });
+  placedCount = totalPieces;
+}
+
+let pieces = [];
+
+function scatterPieces() {
+  // Vrátit už umístěné díly zpět mezi volné
+  removeGhosts();
+  placedCount = 0;
+  winMsg.style.display = 'none';
+  trayLeft.innerHTML = '';
+  trayRight.innerHTML = '';
+  // vyčistit cílová políčka
+  board.querySelectorAll('.cell').forEach(c => c.innerHTML = '');
+
+  const shuffled = pieces.slice().sort(() => Math.random() - 0.5);
+  shuffled.forEach((p, i) => {
+    p.classList.remove('placed', 'wrong');
+    p.draggable = true;
+    (i % 2 === 0 ? trayLeft : trayRight).appendChild(p);
+    setInTray(p);
+  });
+  updateStatus();
+}
+
+/* ---------- Drag & Drop (myš) ---------- */
+let draggedPiece = null;
+
+function addPieceDragHandlers(p) {
+  p.addEventListener('dragstart', e => {
+    draggedPiece = p;
+    p.classList.add('dragging');
+    e.dataTransfer.setData('text/plain', p.dataset.index);
+  });
+  p.addEventListener('dragend', () => {
+    p.classList.remove('dragging');
+    draggedPiece = null;
+  });
+}
+
+function addCellDropHandlers(cell) {
+  cell.addEventListener('dragover', e => { e.preventDefault(); cell.classList.add('over'); });
+  cell.addEventListener('dragleave', () => cell.classList.remove('over'));
+  cell.addEventListener('drop', e => {
+    e.preventDefault();
+    cell.classList.remove('over');
+    if (!draggedPiece) return;
+    tryPlace(draggedPiece, cell);
+  });
+}
+
+function tryPlace(piece, cell) {
+  if (cell.children.length) return;                 // políčko obsazené
+
+  cell.appendChild(piece);
+  setInCell(piece);
+
+  const correct = piece.dataset.index === cell.dataset.index;
+  piece.classList.toggle('placed', correct);
+  piece.classList.toggle('wrong', !correct);
+  piece.draggable = true;                           // díl lze vždy znovu přesunout
+
+  placedCount = countCorrect();                     // vždy přepočítat podle skutečného stavu
+
+  if (placedCount === totalPieces) {
+    winMsg.style.display = 'block';
+    statusEl.textContent = 'Hotovo! Puzzle složeno. 🎉';
+    launchFireworks();
+  } else {
+    winMsg.style.display = 'none';
+    updateStatus();
+  }
+}
+
+/* ---------- Ohňostroj po složení ---------- */
+function launchFireworks(duration = 3500) {
+  let canvas = document.getElementById('fwCanvas');
+  if (!canvas) {
+    canvas = document.createElement('canvas');
+    canvas.id = 'fwCanvas';
+    canvas.style.cssText = 'position:fixed;inset:0;width:100vw;height:100vh;pointer-events:none;z-index:2000;';
+    document.body.appendChild(canvas);
+  }
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+
+  const colors = ['#ff5e5e','#ffd24f','#6dffa0','#4f9cff','#c77dff','#ff9e4f','#ffffff'];
+  let particles = [];
+
+  function burst(x, y) {
+    const n = 60 + Math.floor(Math.random() * 40);
+    const color = colors[Math.floor(Math.random() * colors.length)];
+    for (let i = 0; i < n; i++) {
+      const angle = (Math.PI * 2 * i) / n;
+      const speed = 2 + Math.random() * 4;
+      particles.push({
+        x, y,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        life: 1,
+        color: Math.random() < 0.5 ? color : colors[Math.floor(Math.random()*colors.length)],
+        size: 1.5 + Math.random() * 2
+      });
+    }
+  }
+
+  const start = performance.now();
+  let lastBurst = 0;
+
+  function frame(now) {
+    const elapsed = now - start;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // nové výbuchy v průběhu trvání
+    if (elapsed < duration && now - lastBurst > 350) {
+      lastBurst = now;
+      burst(
+        canvas.width * (0.2 + Math.random() * 0.6),
+        canvas.height * (0.2 + Math.random() * 0.4)
+      );
+    }
+
+    particles.forEach(p => {
+      p.vy += 0.04;           // gravitace
+      p.vx *= 0.99;
+      p.vy *= 0.99;
+      p.x += p.vx;
+      p.y += p.vy;
+      p.life -= 0.012;
+    });
+    particles = particles.filter(p => p.life > 0);
+
+    particles.forEach(p => {
+      ctx.globalAlpha = Math.max(p.life, 0);
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    ctx.globalAlpha = 1;
+
+    if (elapsed < duration || particles.length) {
+      requestAnimationFrame(frame);
+    } else {
+      canvas.remove();
+    }
+  }
+  // první výbuch hned
+  burst(canvas.width * 0.5, canvas.height * 0.35);
+  requestAnimationFrame(frame);
+}
+
+// Vrácení dílu zpět do bočního zásobníku
+function returnToTray(piece, tray) {
+  tray.appendChild(piece);
+  setInTray(piece);
+  piece.classList.remove('placed', 'wrong');
+  piece.draggable = true;
+  placedCount = countCorrect();
+  winMsg.style.display = 'none';
+  updateStatus();
+}
+
+function addTrayDropHandlers(tray) {
+  tray.addEventListener('dragover', e => { e.preventDefault(); tray.classList.add('over'); });
+  tray.addEventListener('dragleave', () => tray.classList.remove('over'));
+  tray.addEventListener('drop', e => {
+    e.preventDefault();
+    tray.classList.remove('over');
+    if (draggedPiece) returnToTray(draggedPiece, tray);
+  });
+}
+addTrayDropHandlers(trayLeft);
+addTrayDropHandlers(trayRight);
+
+function countCorrect() {
+  let n = 0;
+  board.querySelectorAll('.cell').forEach(cell => {
+    const child = cell.firstElementChild;
+    if (child && child.dataset.index === cell.dataset.index) n++;
+  });
+  return n;
+}
+
+function updateStatus() {
+  // Informace o stavu skládání se nezobrazuje
+}
+
+/* ---------- Touch (dotyk) ---------- */
+// Odstraní VŠECHNY případné náhledy (klony), aby nikdy nezůstala viset kopie dílu
+function removeGhosts() {
+  document.querySelectorAll('.piece-ghost').forEach(g => g.remove());
+}
+
+function addTouchHandlers(p) {
+  let ghost = null;
+
+  const endDrag = (clientX, clientY, place) => {
+    removeGhosts();
+    ghost = null;
+    p.classList.remove('dragging');
+    if (place && clientX != null) {
+      const el = document.elementFromPoint(clientX, clientY);
+      const cell = el ? el.closest('.cell') : null;
+      const tray = el ? el.closest('.tray') : null;
+      if (cell) tryPlace(p, cell);
+      else if (tray) returnToTray(p, tray);
+    }
+    draggedPiece = null;
+  };
+
+  p.addEventListener('touchstart', e => {
+    removeGhosts();                 // pojistka: nikdy nesmí existovat starý klon
+    const t = e.touches[0];
+    ghost = p.cloneNode(true);
+    ghost.className = 'piece piece-ghost';   // jen vizuální náhled, nikdy se nepočítá jako díl
+    ghost.removeAttribute('draggable');
+    ghost.style.position = 'fixed';
+    ghost.style.pointerEvents = 'none';
+    ghost.style.opacity = '0.85';
+    ghost.style.zIndex = '1000';
+    ghost.style.left = (t.clientX - pieceW/2) + 'px';
+    ghost.style.top  = (t.clientY - pieceH/2) + 'px';
+    document.body.appendChild(ghost);
+    p.classList.add('dragging');
+    draggedPiece = p;
+    e.preventDefault();
+  }, {passive:false});
+
+  p.addEventListener('touchmove', e => {
+    if (!ghost) return;
+    const t = e.touches[0];
+    ghost.style.left = (t.clientX - pieceW/2) + 'px';
+    ghost.style.top  = (t.clientY - pieceH/2) + 'px';
+    e.preventDefault();
+  }, {passive:false});
+
+  p.addEventListener('touchend', e => {
+    const t = e.changedTouches[0];
+    endDrag(t ? t.clientX : null, t ? t.clientY : null, true);
+  });
+
+  // Přerušený dotyk (např. systémové gesto) – jen uklidit, nic neumisťovat
+  p.addEventListener('touchcancel', () => endDrag(null, null, false));
+}
+</script>
+</body>
+</html>
